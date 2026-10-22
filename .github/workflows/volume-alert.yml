@@ -1,0 +1,30 @@
+name: Volume Alert Bot
+
+on:
+  schedule:
+    # Chạy 3 lần mỗi ngày giao dịch (giờ UTC)
+    - cron: '30 2 * * 1-5'   # 9:30 sáng VN
+    - cron: '0 4 * * 1-5'    # 11:00 sáng VN
+    - cron: '30 7 * * 1-5'   # 14:30 chiều VN
+  workflow_dispatch:          # Cho phép chạy thủ công
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -U --extra-index-url https://vnstocks.com/api/simple vnstock vnai pandas requests
+
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py
