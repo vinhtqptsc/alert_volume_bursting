@@ -1,0 +1,77 @@
+name: Volume Alert Bot
+
+on:
+  schedule:
+    # Giữ nguyên 3 lịch (giờ UTC) = 09:30, 11:00, 14:30 giờ Việt Nam
+    - cron: '30 2 * * 1-5'   # 9:30 sáng VN
+    - cron: '0 4 * * 1-5'    # 11:00 sáng VN
+    - cron: '30 7 * * 1-5'   # 14:30 chiều VN
+  workflow_dispatch:          # Cho phép chạy thủ công
+
+# Không cần ghi vào repo: bản này không lưu trạng thái.
+permissions:
+  contents: read
+
+# Xếp hàng thay vì hủy: không lượt nào bị bỏ vì lượt khác đang chạy.
+concurrency:
+  group: volume-alert
+  cancel-in-progress: false
+
+jobs:
+  # Test chạy độc lập, KHÔNG chặn job gửi cảnh báo (test lỗi vặt không được làm mất tin).
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas
+      - run: python -m unittest discover -s tests -v
+
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -U --extra-index-url https://vnstocks.com/api/simple vnstock vnai pandas requests
+
+      # Chống lặp (fail-open): nhớ mức ratio đã báo trong NGÀY (giờ VN) bằng Actions cache.
+      # Cache mất/hỏng/hết hạn => bot cứ báo như thường, không bao giờ vì thế mà bỏ sót.
+      - name: Ngày hiện tại (giờ VN)
+        id: vn
+        run: echo "d=$(TZ=Asia/Ho_Chi_Minh date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore trạng thái chống lặp
+        uses: actions/cache/restore@v4
+        with:
+          path: .alert-state
+          key: volume-alert-state-${{ steps.vn.outputs.d }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            volume-alert-state-${{ steps.vn.outputs.d }}-
+
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VOLUME_ALERT_STATE: .alert-state/state.json
+        run: python bot.py
+
+      - name: Save trạng thái chống lặp
+        if: ${{ always() && hashFiles('.alert-state/state.json') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .alert-state
+          key: volume-alert-state-${{ steps.vn.outputs.d }}-${{ github.run_id }}-${{ github.run_attempt }}
